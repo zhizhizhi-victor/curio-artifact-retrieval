@@ -1,10 +1,11 @@
 {
   "schema": "curio-resource-release-v1",
-  "tag": "curio-resources-v2-20261104",
-  "repository": "forhongan/curio-artifact-retrieval",
-  "created_at": "2026-11-04T14:03:13.475877+00:00",
-  "source_base_commit": "df2dc3e1613ce721bc6b6ee66b7e3f95d14eb4c7",
-  "gallery_images": 4793,
+  "tag": "curio-resources-v3-10k",
+  "repository": "zhizhizhi-victor/curio-artifact-retrieval",
+  "created_at": "2026-11-08T04:02:06.262269+00:00",
+  "source_base_commit": "37b1da0eceaa9f1da548003abcb05769a5025759",
+  "gallery_images": 10200,
+  "v3_expanded_gallery_images": 4793,
   "frozen_gallery_images": 4692,
   "references": 45,
   "models": {
@@ -33,40 +34,32 @@
     {
       "name": "curio-artifacts-01.zip",
       "group": "artifacts",
-      "bytes": 420655031,
-      "sha256": "76d9e3e837790b0c99ffb65b626cc0a05eacc4d7bfbee6c88805215bde276aa0",
-      "files": 6448,
-      "unpacked_bytes": 419280239
+      "bytes": 575047001,
+      "sha256": "19c72d7325ad1f47be111ba879945487a64caf57fa1bcde462292e58a4a800df",
+      "files": 6532,
+      "unpacked_bytes": 573656335
     },
     {
       "name": "curio-gallery-01.zip",
       "group": "gallery",
-      "bytes": 806344964,
-      "sha256": "7c4433b80f64011cfef55ffa81dd6a967d9c5be29e1e1fe2a984b7e81548931e",
-      "files": 7078,
-      "unpacked_bytes": 805300532
+      "bytes": 805771681,
+      "sha256": "156ef3a9c94768d7d7b6426a84c7a4c6270169beb4b3580773055753e4ad106d",
+      "files": 5616,
+      "unpacked_bytes": 804945177
     },
     {
       "name": "curio-gallery-02.zip",
       "group": "gallery",
-      "bytes": 32317090,
-      "sha256": "d29e6e6dff4e5876d662bd8918f79e116686309d4729c18ea60af634eea4591e",
-      "files": 2508,
-      "unpacked_bytes": 31950734
-    },
-    {
-      "name": "curio-history-01.zip",
-      "group": "history",
-      "bytes": 216069011,
-      "sha256": "29018a45c4d5757d7de656b39d11c853e6aa2f1416232edbaaec0d55f0c7209f",
-      "files": 270,
-      "unpacked_bytes": 216004827
+      "bytes": 645781331,
+      "sha256": "09b81513ae99d10941f4e2a1c9a07bbaba0bd177c46b1529ba4ba98fe6b6790b",
+      "files": 14986,
+      "unpacked_bytes": 643590331
     },
     {
       "name": "curio-models-clip-01.zip",
       "group": "models-clip",
       "bytes": 608866262,
-      "sha256": "4565caeee7d6ec142a24816ab27a641dab411983ec99b2bac6001592913a1b3b",
+      "sha256": "5974b555895c45b1749e57cc7867bf78f4670dd6dd4ce1c84212a2528fa31c9c",
       "files": 8,
       "unpacked_bytes": 608863580
     },
@@ -74,7 +67,7 @@
       "name": "curio-models-dino-01.zip",
       "group": "models-dino",
       "bytes": 88251927,
-      "sha256": "d7068052f833335aa4837ceaf9e07555d52f3abd68fc9cf49e29fe86cdec3835",
+      "sha256": "f10965b67e379d2f8b26406caf9464cf222569e61f22c28f83c304230d383bb1",
       "files": 3,
       "unpacked_bytes": 88250943
     },
@@ -82,7 +75,7 @@
       "name": "curio-models-siglip-01.zip",
       "group": "models-siglip",
       "bytes": 603,
-      "sha256": "7991473f22f11a9785e892e7624b603e245e291f455a2d7ab47861fe20666490",
+      "sha256": "ea30f8b47998e19891cae5bb2649f43159b78d5188e0b3fd344aa8f6b229894a",
       "files": 1,
       "unpacked_bytes": 253
     },
@@ -90,7 +83,7 @@
       "name": "curio-models-siglip-02.zip",
       "group": "models-siglip",
       "bytes": 1500801266,
-      "sha256": "4f697679f67dbfbe77eb7ece6270bbefdb4777b3f3a51a578f66339ae6446cfd",
+      "sha256": "54c7c45a8bd6167124ad6d70c3866c034d3550fd7185ab73caaae9526b906b6d",
       "files": 1,
       "unpacked_bytes": 1500800904
     },
@@ -98,120 +91,40 @@
       "name": "curio-models-siglip-03.zip",
       "group": "models-siglip",
       "bytes": 38653982,
-      "sha256": "b21849e9641de6390980757df0db4f3bae40f5a951349d46396250e760ac45c1",
+      "sha256": "92bdf4da50253a2262aaa369856894867e69ce7d7cd3046066f94a9656827e88",
       "files": 5,
       "unpacked_bytes": 38652236
     },
     {
-      "name": "curio-originals-01.zip",
-      "group": "originals",
-      "bytes": 801866425,
-      "sha256": "80bfd44d5c3d859bf85835261121f297fc7ef46700778ef18cbb8259335df5a9",
-      "files": 411,
-      "unpacked_bytes": 801807685
-    },
-    {
-      "name": "curio-originals-02.zip",
-      "group": "originals",
-      "bytes": 805300227,
-      "sha256": "f78116cb55033d0d4de18cb23c2fec63e7e72dffefed9e2ced7328a61a2d68cf",
-      "files": 448,
-      "unpacked_bytes": 805240173
-    },
-    {
-      "name": "curio-originals-03.zip",
-      "group": "originals",
-      "bytes": 795959616,
-      "sha256": "22674836ca6eac8b6d4cfbebf37429a56c856313ef5873dc50f711dac91770d2",
-      "files": 435,
-      "unpacked_bytes": 795901304
-    },
-    {
-      "name": "curio-originals-04.zip",
-      "group": "originals",
-      "bytes": 804638396,
-      "sha256": "8843d7352b23153ca60a3b08955560c0bb8eefe478c2ea76cab481a8b108255d",
-      "files": 263,
-      "unpacked_bytes": 804603132
-    },
-    {
-      "name": "curio-originals-05.zip",
-      "group": "originals",
-      "bytes": 804577575,
-      "sha256": "007a69a9d7fcd19b3f154a4f69fcf3ae8bb50b75a15b8fb771da79eadb951dca",
-      "files": 436,
-      "unpacked_bytes": 804521681
-    },
-    {
-      "name": "curio-originals-06.zip",
-      "group": "originals",
-      "bytes": 804509963,
-      "sha256": "3eae405920a733edb0c2887ef2d4d2d917808552f889ba17b8c5c869d101e552",
-      "files": 573,
-      "unpacked_bytes": 804441105
-    },
-    {
-      "name": "curio-originals-07.zip",
-      "group": "originals",
-      "bytes": 803859364,
-      "sha256": "2465e4be3ccabb3708c57b5272206b960930ab61e5ab0edaf48de7a20ebbedef",
-      "files": 620,
-      "unpacked_bytes": 803784942
-    },
-    {
-      "name": "curio-originals-08.zip",
-      "group": "originals",
-      "bytes": 804434963,
-      "sha256": "ed381e4637b9c0b18371b652ac463b3ee9342c9946ca8c5fd8aa80be3b36a064",
-      "files": 581,
-      "unpacked_bytes": 804365219
-    },
-    {
-      "name": "curio-originals-09.zip",
-      "group": "originals",
-      "bytes": 804416346,
-      "sha256": "ca03c181c89cdb4aad33f021927f8879167e9ba7dba25f7d6de84479961e6fb7",
-      "files": 437,
-      "unpacked_bytes": 804363884
-    },
-    {
-      "name": "curio-originals-10.zip",
-      "group": "originals",
-      "bytes": 802880392,
-      "sha256": "96b6c937fd598096dc3753d547b19a1d0b9394fcea3c928c52ebcb89acabfe48",
-      "files": 576,
-      "unpacked_bytes": 802811072
-    },
-    {
-      "name": "curio-originals-11.zip",
-      "group": "originals",
-      "bytes": 48750098,
-      "sha256": "7a469583b362942aad4b9ebf2513e403edaf0813f3906907a7e9e758f100bd8b",
-      "files": 13,
-      "unpacked_bytes": 48748128
+      "name": "curio-originals-10k-01.zip",
+      "group": "originals-10k",
+      "bytes": 622258582,
+      "sha256": "066919e2eb2ee466466e6c7dbef6bde8006a5bff06aec0ff3650386ac739736f",
+      "files": 5508,
+      "unpacked_bytes": 621597546
     },
     {
       "name": "curio-records-01.zip",
       "group": "records",
-      "bytes": 91991696,
-      "sha256": "5f9d93193bcdc36cce30faf7a813f149f03286b61e020f2ab92223fa5c3815a5",
-      "files": 7816,
-      "unpacked_bytes": 90832752
+      "bytes": 130528223,
+      "sha256": "ab4c2561bf735e3d7f774f44f9aa6216e82759cc3bf5b302e9f3ebb697041989",
+      "files": 16309,
+      "unpacked_bytes": 128330351
     },
     {
       "name": "curio-references-01.zip",
       "group": "references",
       "bytes": 33736633,
-      "sha256": "21c72280d8c29006250b3c54cbc772640bf8bace2bb1004c3b9edc105e9a09c1",
+      "sha256": "3c722f64088e94047dcb5ee9ca27a1348a28ff57b67a1194643177656ec4fa8c",
       "files": 45,
       "unpacked_bytes": 33729811
     },
     {
       "name": "curio-files.jsonl",
       "group": "inventory",
-      "bytes": 5919353,
-      "sha256": "3ecd15d011980e946b006f623f653d4f7fced2df004daf636e68df4d69046221",
-      "files": 28976
+      "bytes": 9690150,
+      "sha256": "b4b6fd49557ba3a2733e315f47390438e37cf7435da0b1b6354ceb8d6b04cfff",
+      "files": 49014
     }
   ],
   "excluded": [
