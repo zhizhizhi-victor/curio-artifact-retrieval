@@ -14,6 +14,18 @@ def term_pattern(term: str) -> str:
         return r"(?<!陶)瓷"
     if term == "陶":
         return r"陶(?!瓷)"
+    # Guard single-character Chinese and polysemous English terms against
+    # grammatical similes, verbs, and depicted-scene compounds.
+    if term == "像":
+        return r"(?<![口端形体状好就图影头頭])像(?![^，。；,\s]{0,8}(?:一样|似的)|尖|喇叭)"
+    if term == "盘":
+        return r"(?<![算棋])盘(?![旋曲绕繞龙龍长長踞坐])"
+    if term == "木":
+        return r"(?<![树樹草花林灌乔喬])木"
+    if term == "盖":
+        return r"(?<![涵覆])盖(?!缝)"
+    if term == "covered":
+        return r"(?<![a-z])covered(?![a-z])(?!\s+(?:with|in|by)\b)"
     return rf"(?<![a-z]){escaped}(?![a-z])" if term.isascii() else escaped
 
 
@@ -94,6 +106,11 @@ def parse_query(query: str) -> ParsedQuery:
             remainder = re.sub(term_pattern(alias), " ", remainder, flags=re.I)
         if not any(re.search(term_pattern(alias), remainder, re.I) for alias in VOCAB["object_type"]["pot"]):
             slots["object_type"] = [value for value in slots["object_type"] if value != "pot"]
+    # Robes worn by depicted figures (穿...袍) describe attire, not a garment artifact.
+    if "garment" in slots["object_type"]:
+        attire_stripped = re.sub(r"(?:身穿|穿着|穿)[^,，。;；\s]{0,8}袍", " ", positive_text)
+        if not any(re.search(term_pattern(alias), attire_stripped, re.I) for alias in VOCAB["object_type"]["garment"]):
+            slots["object_type"] = [value for value in slots["object_type"] if value != "garment"]
     era = None
     era_label = None
     for label, (start, end, aliases) in ERAS.items():

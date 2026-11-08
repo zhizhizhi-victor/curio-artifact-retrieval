@@ -160,3 +160,23 @@ def test_negated_ceramic_umbrella_keeps_only_the_requested_exclusion():
     parsed = parse_query("玉器，不要陶瓷")
     assert parsed.slots["material"] == ["jade"]
     assert {entry["value"] for entry in parsed.negations if entry["slot"] == "material"} == {"ceramic"}
+
+
+@pytest.mark.parametrize("query,forbidden_slot,forbidden_value", [
+    ("细长窄条形物件，一端像尖刃，另一端有圆环", "object_type", "figure"),
+    ("瓶口像喇叭一样张开，颈部细长", "object_type", "figure"),
+    ("深红色圆形小盒，表面满是盘旋雕刻纹", "object_type", "plate"),
+    ("圆盘中央绘有临水建筑、树木与小船", "material", "wood"),
+    ("长颈瓷瓶，瓶腹画有穿绿袍的人物", "object_type", "garment"),
+    ("a round red box covered with deep swirling carved relief", "object_type", "lid"),
+])
+def test_compound_and_grammatical_boundaries_prevent_false_positive_slots(query, forbidden_slot, forbidden_value):
+    parsed = parse_query(query)
+    assert forbidden_value not in parsed.slots[forbidden_slot]
+
+
+def test_true_statue_plate_wood_and_garment_queries_still_match():
+    assert "figure" in parse_query("站立人像").slots["object_type"]
+    assert "plate" in parse_query("青花圆盘").slots["object_type"]
+    assert "wood" in parse_query("木雕盒").slots["material"]
+    assert "garment" in parse_query("刺绣长袍").slots["object_type"]

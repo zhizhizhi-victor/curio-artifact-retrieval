@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -21,24 +22,36 @@ MODEL_REVISIONS = {
 }
 
 
+def _default_cache_dir() -> str | None:
+    if os.getenv("HF_HUB_CACHE") or os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE"):
+        return None
+    bundled = Path(__file__).resolve().parents[3] / "models" / "huggingface" / "hub"
+    return str(bundled) if bundled.is_dir() else None
+
+
 class Encoder:
     def __init__(self, name: str = "siglip", device: str = "auto", adapter_path=None):
         if name not in MODEL_IDS:
             raise ValueError(f"Unknown encoder {name!r}; choose {list(MODEL_IDS)}")
         self.name = name
         self.model_id = MODEL_IDS[name]
+        eff_device = os.getenv("CURIO_DEVICE", device) if device == "auto" else device
         self.device = (
             torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if device == "auto"
-            else torch.device(device)
+            if eff_device == "auto"
+            else torch.device(eff_device)
         )
         # A few CPU threads avoid BLAS oversubscription on desktop machines.
         torch.set_num_threads(min(4, torch.get_num_threads()))
+        cache_dir = _default_cache_dir()
+        pretrained_kwargs = {"cache_dir": cache_dir} if cache_dir else {}
         self.processor = AutoProcessor.from_pretrained(
-            self.model_id, revision=MODEL_REVISIONS[name], use_fast=False
+            self.model_id, revision=MODEL_REVISIONS[name], use_fast=False, **pretrained_kwargs
         )
         self.model = (
-            AutoModel.from_pretrained(self.model_id, revision=MODEL_REVISIONS[name])
+            AutoModel.from_pretrained(
+                self.model_id, revision=MODEL_REVISIONS[name], **pretrained_kwargs
+            )
             .to(self.device)
             .eval()
         )
@@ -48,10 +61,11 @@ class Encoder:
         if adapter_path:
             from peft import PeftModel
 
-            adapter_file = Path(adapter_path) / "adapter_model.safetensors"
+            resolved_adapter = Path(str(adapter_path).replace("\\", "/"))
+            adapter_file = resolved_adapter / "adapter_model.safetensors"
             self.adapter_hash = hashlib.sha256(adapter_file.read_bytes()).hexdigest()
             # Merge for inference so the existing get_*_features API remains unchanged.
-            self.model = PeftModel.from_pretrained(self.model, adapter_path).merge_and_unload()
+            self.model = PeftModel.from_pretrained(self.model, str(resolved_adapter)).merge_and_unload()
             self.model.eval()
 
     @property

@@ -4,21 +4,36 @@
 
 **组员先读：[组内讨论板 DISCUSSION.md](DISCUSSION.md)**，包含当前思路、算法与模型、实测效果、局限、待讨论议题及留言模板。团队协作流程见 [docs/COLLABORATION.md](docs/COLLABORATION.md)，贡献和拉取请求检查见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-**完整资源下载：[GitHub Release：图片、底模、训练权重、索引与实验日志](https://github.com/forhongan/curio-artifact-retrieval/releases/tag/curio-resources-v2-20261104)**。资源作为同仓库 Release 附件共享，避免把约11.11 GiB二进制文件写入Git历史。默认运行资源约2.81 GiB；全部原图、CLIP和作废历史另有可选包。安装、分包说明和许可见 [RESOURCES.md](docs/RESOURCES.md)，固定哈希见 [resources_manifest.json](docs/resources_manifest.json)。
+**完整资源下载：[GitHub Release：10,200张CC0图片库、底模、双语属性对比LoRA权重、向量索引与实验记录](https://github.com/zhizhizhi-victor/curio-artifact-retrieval/releases/tag/curio-resources-v3-10k)**。资源作为同仓库 Release 附件共享，避免将数 GiB 二进制文件写入 Git 历史。安装、分包说明和许可见 [RESOURCES.md](docs/RESOURCES.md)，固定哈希见 [resources_manifest.json](docs/resources_manifest.json)。
 
-```powershell
-# 克隆后先恢复默认运行资源；仅需要Python 3.11+，可断点续传和校验
+```bash
+# 克隆后先恢复完整运行资源（含 10,200 图库、SigLIP2/DINO 底模、LoRA 与索引）；仅需 Python 3.11+，支持断点续传和 SHA256 校验
 python scripts/download_resources.py
-# 若需要原图、CLIP对照与历史实验，改用 --all
+# 若需要额外下载 5,508 张新增采集博物馆原图，改用 --all
 ```
 
-本地已准备 **4,692 件 CC0 图像**（Met 2,954、Cleveland 1,738）、冻结数据、两个预训练编码器、训练和评测脚本、FastAPI 后端和 React 界面。正式结果见 [docs/RESULTS.md](docs/RESULTS.md)；原始日志和模型权重保存在本地 `artifacts/` 与 `logs/`。v2 的正式视觉/元数据评测、失败分析和系统验收已完成，课程报告与真人复核留到下一阶段。
+> **核心升级（v3-10k 多条件纯视觉检索与规模扩库，详见 [docs/COMPOSITIONAL_10K_REPORT.md](docs/COMPOSITIONAL_10K_REPORT.md)）**：
+> 1. **10,200 件跨四馆 CC0 中国文物扩库**（`collection_10k.jsonl`：Met 3,904、MIA 2,955、Cleveland 1,810、AIC 1,531），全部经 SHA256 / 256-bit aHash / 64-bit pHash 与参考图隔离校验，且保持原 4,692 件冻结快照 `collection_v2.jsonl` 哈希零改动。
+> 2. **免重训多条件组合纯视觉检索（`subquery_and` / `compositional`）**：主体锚定子句拆解 + 跨语言可见形态桥接 + 候选池 Soft-AND 短板惩罚 + F1 可靠度校准对数概率探针门控，将盲测集双语均值 `nDCG@10` 从 `0.8615` 提升至 `0.9017`（中文 `+0.0740`, $p=0.0060$）。
+> 3. **双语属性对比空间池化头 LoRA（`siglip_lora_comp`）**：微调 `SigLIP-2` 空间多头注意力池化层 `vision_model.head` + NegCLIP 式单属性反事实硬负例，在 `visual_test` 创下英文 `nDCG@10 = 0.9345`，并在 4,692 全库 160 题评测上将英文 / 中文 `nDCG@10` 提升至 **`0.4469 (+0.0399) / 0.4628 (+0.0444)`**（`P@5` 达 `56.0% / 56.8%`）。
+
+本地基准包含 **4,692 件冻结 CC0 图像**（Met 2,954、Cleveland 1,738）与 **10,200 件扩展 CC0 图库**、预训练编码器、训练和评测脚本、FastAPI 后端和 React 界面。正式结果见 [docs/COMPOSITIONAL_10K_REPORT.md](docs/COMPOSITIONAL_10K_REPORT.md) 与 [docs/RESULTS.md](docs/RESULTS.md)；原始日志和模型权重保存在本地 `artifacts/` 与 `logs/`。
 
 **本轮新增**：真实馆外参考图→本地图图匹配、DINOv2、器型/前景颜色/纹理消融、DINO局部patch研究模式、可信性诊断修正，以及101张新图组成的可选 **4,793图扩展图库**。参考图有官方来源、许可、哈希及全库同物/近重复排除；在线按缓存参考图选择，未伪称实时LLM联网。8类意图在全4,692图召回后，对244张不同图片、257条查询/图片对做了AI像素盲判，结果包含负例，专门分支未证明普遍更优。详细见 [新增路线与实测](docs/REFERENCE_RETRIEVAL_RESULTS.md)、[来源与扩展](docs/REFERENCE_SOURCES.md)、[当前状态](docs/CURRENT_STATE.md)。
 
 ## 直接运行
 
-在本目录打开 PowerShell。当前工作目录已有虚拟环境、数据和模型缓存时：
+macOS / Linux 一键启动（自动启用 Apple Silicon `mps` / CUDA，并挂载 10,200 张扩展图库）：
+
+```bash
+# 推荐：加载新微调双语属性对比 LoRA + 10,200 张扩展图库 + 多条件组合检索
+bash scripts/run.sh --comp-lora
+
+# 或：加载原冻结 LoRA + 免重训多条件组合检索
+bash scripts/run.sh --compositional
+```
+
+Windows PowerShell 启动：
 
 ```powershell
 .\scripts\run.ps1
@@ -55,7 +70,9 @@ Python 3.11–3.12；开发设备为 Windows、RTX 3070 8GB、32GB RAM。`uv.loc
 |---|---|---|
 | `baseline` | 原文文本向量 × 图像向量 | 原始零样本基线 |
 | `translated` | 规则展开文本 × 图像向量 | 中英查询处理对照 |
-| `image_only`（默认） | 重写后的图文相似度；当前属性权重0 | 生产视觉检索 |
+| `image_only`（默认） | 重写后的图文相似度 + 可选属性探针 | 生产视觉检索 |
+| `subquery_and` | 主体锚定子句拆解 + 视觉形态桥接 + Soft-AND 合取 | 免探针纯图像多条件组合检索 |
+| `compositional` | `subquery_and` + F1 可靠度校准对数概率探针门控 | 完整纯图像多条件组合检索 |
 | 参考图 SigLIP / DINO | 外部参考图 × 本地图像向量 | 图图匹配 |
 | 形状/颜色/纹理及融合 | 前景遮罩与图像特征 | 专门视觉研究分支，有覆盖限制 |
 | DINO patch | 全图召回100 + 前景局部对应/软轮廓 | 独立弱标签实验，未证明稳定提升 |

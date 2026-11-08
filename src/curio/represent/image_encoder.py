@@ -1,5 +1,6 @@
 """Frozen image-only backbone for reference matching; no text embedding API."""
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -12,12 +13,25 @@ DINO_ID = "facebook/dinov2-small"
 DINO_REVISION = "ed25f3a31f01632728cabb09d1542f84ab7b0056"
 
 
+def _default_cache_dir() -> str | None:
+    if os.getenv("HF_HUB_CACHE") or os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE"):
+        return None
+    bundled = Path(__file__).resolve().parents[3] / "models" / "huggingface" / "hub"
+    return str(bundled) if bundled.is_dir() else None
+
+
 class DinoEncoder:
     def __init__(self, device="auto"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
         torch.set_num_threads(min(4, torch.get_num_threads()))
-        self.processor = AutoImageProcessor.from_pretrained(DINO_ID, revision=DINO_REVISION, use_fast=False)
-        self.model = AutoModel.from_pretrained(DINO_ID, revision=DINO_REVISION).to(self.device).eval()
+        cache_dir = _default_cache_dir()
+        pretrained_kwargs = {"cache_dir": cache_dir} if cache_dir else {}
+        self.processor = AutoImageProcessor.from_pretrained(
+            DINO_ID, revision=DINO_REVISION, use_fast=False, **pretrained_kwargs
+        )
+        self.model = AutoModel.from_pretrained(
+            DINO_ID, revision=DINO_REVISION, **pretrained_kwargs
+        ).to(self.device).eval()
 
     @property
     def metadata(self):

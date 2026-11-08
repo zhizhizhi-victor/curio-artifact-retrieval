@@ -14,9 +14,21 @@ import numpy as np
 from curio.query import parse_query
 from curio.query.ontology import ERAS, VOCAB
 from curio.query.parser import term_pattern
+from .compositional import (
+    DEFAULT_LAMBDA_AND,
+    DEFAULT_LAMBDA_NEG,
+    DEFAULT_LAMBDA_PROBE,
+    DEFAULT_POOL_K,
+    DEFAULT_TAU,
+    calibrated_probe_logscore,
+    decompose_visual_query,
+    soft_and_zscores,
+)
 from .lexical import BM25
 from .evidence import retrieval_evidence
 import re
+
+IMAGE_ONLY_VARIANTS = frozenset({"image_only", "subquery_and", "compositional"})
 
 
 def searchable_text(item: dict) -> str:
@@ -69,6 +81,7 @@ class SearchService:
         self.probe_configured = probes_path is not None or probes is not None
         self.probe_weight = probe_weight
         self.probe_warning: str | None = None
+        self.probe_report: dict = dict(probe_report or {})
         self.probe_predictions: dict = {}
         self.probe_files_sha256: dict[str, str] = {}
         self.probe_load_ms = 0.0
@@ -81,6 +94,7 @@ class SearchService:
         self.index_version = "metadata-" + hashlib.sha256(json.dumps(items, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
         self.embeddings = None
         self.vector_rows: list[int] = []
+        self.catalog_to_embedding_row: dict[int, int] = {}
         try:
             if embeddings is None and index_dir is not None:
                 directory = Path(index_dir)
@@ -117,12 +131,14 @@ class SearchService:
                     raise ValueError("Index contains zero vectors")
                 lookup = {str(item["item_id"]): idx for idx, item in enumerate(items)}
                 self.vector_rows = [lookup[str(key)] for key in ids]
+                self.catalog_to_embedding_row = {cat_idx: emb_row for emb_row, cat_idx in enumerate(self.vector_rows)}
                 self.indexed_item_count = len(ids)
                 self.embeddings = values / norms
                 self.index_version = str(self.manifest.get("index_version", self.manifest.get("version", "vectors-" + hashlib.sha256(values.tobytes()).hexdigest()[:12])))
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.index_warning = f"图像索引不可用：{exc}"
             self.embeddings = None
+            self.catalog_to_embedding_row = {}
         if self.probe_configured:
             probe_started = time.perf_counter()
             try:
@@ -140,9 +156,11 @@ class SearchService:
                         from curio.represent.probes import LinearProbes
                         probes = LinearProbes(path)
                 self._prepare_probes(probes, probe_report)
+                self.probe_report = dict(probe_report or {})
             except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
                 self.probe_warning = f"视觉探针不可用：{exc}。"
                 self.probe_predictions = {}
+                self.probe_report = {}
                 self.probe_files_sha256 = {}
             self.probe_load_ms = (time.perf_counter() - probe_started) * 1000
 
@@ -286,7 +304,7 @@ class SearchService:
     def model_version(self) -> str:
         return str(self.manifest.get("model_version", self.manifest.get("model", self.encoder_name))) if self.embeddings is not None else "none (metadata-only)"
 
-    def _dense(self, text: str, timings: dict | None = None) -> np.ndarray:
+    def _encode_query_batch(self, texts: list[str], timings: dict | None = None) -> np.ndarray:
         if self.encoder is False or self.embeddings is None:
             raise RuntimeError("Image embeddings unavailable")
         with self._encoder_lock:
@@ -308,18 +326,26 @@ class SearchService:
                         raise ValueError(f"Loaded encoder {field} does not match index metadata")
             encode_started = time.perf_counter()
             try:
-                vector = np.asarray(self.encoder.encode_texts([text]), dtype=np.float32)[0]
+                matrix = np.asarray(self.encoder.encode_texts(texts), dtype=np.float32)
             finally:
                 if timings is not None:
                     timings["encode_ms"] += (time.perf_counter() - encode_started) * 1000
-        retrieve_started = time.perf_counter()
-        if vector.ndim != 1 or vector.shape[0] != self.embeddings.shape[1] or not np.isfinite(vector).all():
+        if matrix.ndim == 1:
+            matrix = matrix[None, :]
+        if len(texts) > 1 and matrix.shape[0] == 1:
+            matrix = np.repeat(matrix, len(texts), axis=0)
+        if matrix.ndim != 2 or matrix.shape != (len(texts), self.embeddings.shape[1]) or not np.isfinite(matrix).all():
             raise ValueError("Query and image embedding dimensions differ")
-        norm = float(np.linalg.norm(vector))
-        if norm == 0:
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        if np.any(norms == 0):
             raise ValueError("Encoder returned a zero query vector")
+        return matrix / norms
+
+    def _dense(self, text: str, timings: dict | None = None) -> np.ndarray:
+        unit_vector = self._encode_query_batch([text], timings)[0]
+        retrieve_started = time.perf_counter()
         scores = np.full(len(self.items), -np.inf, dtype=np.float32)
-        scores[self.vector_rows] = self.embeddings @ (vector / norm)
+        scores[self.vector_rows] = self.embeddings @ unit_vector
         if timings is not None:
             timings["retrieve_ms"] += (time.perf_counter() - retrieve_started) * 1000
         return scores
@@ -361,15 +387,36 @@ class SearchService:
         parse_ms = (time.perf_counter() - started) * 1000
         warnings = list(parsed.warnings)
         image_only = variant == "image_only"
-        if image_only and parsed.negations:
+        compositional_mode = variant in {"subquery_and", "compositional"}
+        pure_image_mode = variant in IMAGE_ONLY_VARIANTS
+        if pure_image_mode and parsed.negations:
             warnings = [warning for warning in warnings if "元数据冲突" not in warning]
-            warnings.append("排除条件仅可由覆盖该属性的图像探针提供软概率支持，并非不存在该属性的证明；不使用元数据冲突降权，缺失模型类别保持未知。")
+            warnings.append(
+                "排除条件仅可由覆盖该属性的图像探针或反向视觉提示提供软概率/相似度支持，并非不存在该属性的证明；不使用元数据冲突降权，缺失模型类别保持未知。"
+                if compositional_mode
+                else "排除条件仅可由覆盖该属性的图像探针提供软概率支持，并非不存在该属性的证明；不使用元数据冲突降权，缺失模型类别保持未知。"
+            )
             parsed.warnings = list(warnings)
         dense = None
+        q_vecs = None
+        decomp = decompose_visual_query(query, parsed) if compositional_mode else None
         degraded = False
         effective_variant = variant
         load_timings = {"model_load_ms": 0.0, "cold_start": False, "encode_ms": 0.0, "retrieve_ms": 0.0}
-        if variant != "lexical":
+        if compositional_mode:
+            batch_texts = [decomp["global_prompt"], *decomp["sub_prompts"], *decomp["neg_prompts"]]
+            try:
+                q_vecs = self._encode_query_batch(batch_texts, load_timings)
+                dense_started = time.perf_counter()
+                dense = np.full(len(self.items), -np.inf, dtype=np.float32)
+                dense[self.vector_rows] = self.embeddings @ q_vecs[0]
+                load_timings["retrieve_ms"] += (time.perf_counter() - dense_started) * 1000
+                self.dense_error = None
+            except Exception as exc:
+                degraded = True
+                self.dense_error = f"视觉检索不可用，{variant} 不返回元数据替代结果（{type(exc).__name__}）。"
+                warnings.append(self.dense_error)
+        elif variant != "lexical":
             if variant == "adapted" and not self.manifest.get("adapted", False):
                 degraded = True
                 warnings.append("适配模型未加载；当前使用基础编码器。")
@@ -386,7 +433,7 @@ class SearchService:
         if self.index_warning:
             warnings.append(self.index_warning)
         retrieve_started = time.perf_counter()
-        lexical = None if image_only else self.lexical.score(parsed.rewritten if variant != "baseline" else parsed.positive_text)
+        lexical = None if pure_image_mode else self.lexical.score(parsed.rewritten if variant != "baseline" else parsed.positive_text)
         candidates = [idx for idx in range(len(self.items))
                       if (allowed is None or str(self.items[idx]["item_id"]) in allowed)
                       and self._filter(idx, filters or {})]
@@ -395,12 +442,16 @@ class SearchService:
             candidates = [idx for idx in candidates if idx in indexed]
             degraded = True
             warnings.append(f"图像索引覆盖 {self.indexed_item_count}/{len(self.items)} 件；未索引藏品未参与本次视觉结果。")
-        slot_info = None if image_only else [self._slot_score(idx, parsed) for idx in range(len(self.items))]
+        slot_info = None if pure_image_mode else [self._slot_score(idx, parsed) for idx in range(len(self.items))]
         load_timings["retrieve_ms"] += (time.perf_counter() - retrieve_started) * 1000
         fusion_started = time.perf_counter()
         probe_scores, probe_fields = None, []
-        probe_coverage = self._probe_coverage(parsed) if image_only or variant == "visual" else None
-        if image_only and probe_coverage and any(entry.get("reason") == "component_presence_not_trained"
+        sub_and_map: dict[int, float] = {}
+        neg_pen_map: dict[int, float] = {}
+        comp_probe_bonus_map: dict[int, float] = {}
+        active_probe_weight = 0.0
+        probe_coverage = self._probe_coverage(parsed) if variant in {"image_only", "compositional", "visual"} else None
+        if variant in {"image_only", "compositional"} and probe_coverage and any(entry.get("reason") == "component_presence_not_trained"
                                   for entries in probe_coverage.values() for entry in entries):
             warning = "object_type=lid 仅表示独立盖子类别，不能判断器物带盖或无盖；未训练盖子部件存在性探针，该部件条件保持未知，不计入探针分数。"
             warnings.append(warning)
@@ -431,7 +482,72 @@ class SearchService:
         ranks = {idx: {} for idx in candidates}
         rrf_denominator = 1.0
         dense_normalized = {}
-        if image_only:
+        if compositional_mode:
+            if dense is None or q_vecs is None:
+                effective_variant = "unavailable"
+                scores = {}
+            else:
+                valid_candidates = [idx for idx in candidates if np.isfinite(dense[idx]) and idx in self.catalog_to_embedding_row]
+                if not valid_candidates:
+                    scores = {}
+                    if variant == "compositional" and not self.probe_predictions:
+                        effective_variant = "subquery_and"
+                        degraded = True
+                else:
+                    emb_rows = [self.catalog_to_embedding_row[idx] for idx in valid_candidates]
+                    cand_embs = self.embeddings[emb_rows]
+                    s0 = cand_embs @ q_vecs[0]
+                    pool_k = min(DEFAULT_POOL_K, len(valid_candidates))
+                    pool_idx = np.argsort(-s0)[:pool_k]
+                    sd0 = float(s0[pool_idx].std())
+                    scale = sd0 if sd0 > 1e-5 else 0.05
+                    combined = s0.astype(np.float64).copy()
+                    n_sub = len(decomp["sub_prompts"])
+                    n_neg = len(decomp["neg_prompts"])
+                    if n_sub >= 2:
+                        sub_vecs = q_vecs[1 : 1 + n_sub]
+                        sub_mat = cand_embs @ sub_vecs.T
+                        z_and = soft_and_zscores(sub_mat, pool_idx, tau=DEFAULT_TAU)
+                        combined = combined + DEFAULT_LAMBDA_AND * scale * z_and
+                        sub_and_map = {idx: float(z_and[pos]) for pos, idx in enumerate(valid_candidates)}
+                    if n_neg >= 1:
+                        neg_vecs = q_vecs[1 + n_sub : 1 + n_sub + n_neg]
+                        neg_mat = cand_embs @ neg_vecs.T
+                        pool_neg = neg_mat[pool_idx]
+                        z_neg = np.clip(
+                            (neg_mat - pool_neg.mean(0, keepdims=True)) / np.maximum(pool_neg.std(0, keepdims=True), 1e-4),
+                            0.0,
+                            3.5,
+                        ).max(axis=1)
+                        combined = combined - DEFAULT_LAMBDA_NEG * scale * z_neg
+                        neg_pen_map = {idx: float(z_neg[pos]) for pos, idx in enumerate(valid_candidates)}
+                    if variant == "compositional":
+                        if not self.probe_predictions:
+                            effective_variant = "subquery_and"
+                            degraded = True
+                            warnings.append((self.probe_warning or "未加载可用视觉探针。") + " compositional 已降级为子句软合取排序（subquery_and）。")
+                        else:
+                            p_log, probe_fields = calibrated_probe_logscore(
+                                self.probe_predictions,
+                                self.probe_report,
+                                parsed,
+                                valid_candidates,
+                                self._probe_constraint_unknown_reason,
+                            )
+                            if p_log is None:
+                                effective_variant = "subquery_and"
+                                warnings.append("当前查询没有受已训练视觉探针覆盖的属性；compositional 使用子句软合取排序（subquery_and）。")
+                            else:
+                                p_pool = p_log[pool_idx]
+                                p_z = np.clip((p_log - p_pool.mean()) / max(float(p_pool.std()), 1e-4), -3.0, 2.5)
+                                combined = combined + DEFAULT_LAMBDA_PROBE * scale * p_z
+                                active_probe_weight = DEFAULT_LAMBDA_PROBE
+                                probe_scores = np.full(len(self.items), np.nan, dtype=np.float32)
+                                for pos, idx in enumerate(valid_candidates):
+                                    probe_scores[idx] = float(p_z[pos])
+                                    comp_probe_bonus_map[idx] = float(DEFAULT_LAMBDA_PROBE * scale * p_z[pos])
+                    scores = {idx: float(combined[pos]) for pos, idx in enumerate(valid_candidates)}
+        elif image_only:
             if dense is None:
                 scores = {}
             elif probe_scores is None:
@@ -460,8 +576,8 @@ class SearchService:
             rrf_denominator = max(active_channels, 1) / 61
             scores = {idx: value for idx, value in fused.items() if value > 0}
         # The baseline remains the untouched raw-query dense comparator.
-        # Other variants penalize metadata conflicts, never infer absence.
-        for idx in scores if variant not in {"baseline", "image_only"} else []:
+        # Pure image variants never touch metadata conflicts; other variants penalize conflicts without inferring absence.
+        for idx in scores if variant not in {"baseline", *IMAGE_ONLY_VARIANTS} else []:
             conflicts = slot_info[idx][2]
             if conflicts:
                 scores[idx] -= .05 * conflicts if effective_variant in {"hybrid", "visual"} else .25 * conflicts
@@ -471,11 +587,19 @@ class SearchService:
         results = []
         for rank, idx in enumerate(ordered, 1):
             item = self.items[idx]
-            matched = [] if image_only else slot_info[idx][1]
+            matched = [] if pure_image_mode else slot_info[idx][1]
             evidence = [{"kind": "metadata", "slot": hit["slot"], "value": hit["value"],
                          "text": f"元数据匹配 {hit['slot']}={hit['value']}；未进行图像可见性核验。"} for hit in matched]
             if not evidence:
-                evidence = [{"kind": "similarity" if dense is not None else "metadata", "text": "按图文嵌入相似度排序，未核验具体视觉属性。" if dense is not None else "按元数据文本相关性排序，未核验图像内容。"}]
+                if compositional_mode and dense is not None:
+                    if idx in sub_and_map:
+                        evidence = [{"kind": "similarity", "text": f"多条件视觉子句软合取（{len(decomp['sub_prompts'])} 子句，Soft-AND z={sub_and_map[idx]:+.2f}）与跨语言全局相似度联合排序；未使用馆藏元数据。"}]
+                    else:
+                        evidence = [{"kind": "similarity", "text": "按跨语言视觉形态桥接与图文嵌入相似度排序，未核验具体视觉属性；未使用馆藏元数据。"}]
+                    if idx in neg_pen_map and neg_pen_map[idx] > 0:
+                        evidence.append({"kind": "similarity", "text": f"反向视觉对比提示软抑制 z={neg_pen_map[idx]:.2f}（嵌入相似度软信号，并非属性不存在证明）。"})
+                else:
+                    evidence = [{"kind": "similarity" if dense is not None else "metadata", "text": "按图文嵌入相似度排序，未核验具体视觉属性。" if dense is not None else "按元数据文本相关性排序，未核验图像内容。"}]
             for task, value, probabilities, negated in probe_fields:
                 probability = float(probabilities[idx])
                 evidence.append({"kind": "visual_probe", "slot": task, "value": value,
@@ -484,19 +608,29 @@ class SearchService:
                                  "text": (f"弱监督视觉分类预测 {task}={value}，概率 {probability:.1%}；排除条件采用 1−P={1 - probability:.1%} 软支持，不能证明属性不存在，并非人工确认或视觉核验。" if negated
                                           else f"弱监督视觉分类预测 {task}={value}，概率 {probability:.1%}；这是图像嵌入分类器预测，并非人工确认或视觉核验。")})
             key = str(item["item_id"])
+            probe_val = float(probe_scores[idx]) if probe_scores is not None and np.isfinite(probe_scores[idx]) else None
+            breakdown = {
+                "dense": float(dense[idx]) if dense is not None and np.isfinite(dense[idx]) else None,
+                "bm25": None if pure_image_mode else round(float(lexical[idx]), 6),
+                "slots": None if pure_image_mode else slot_info[idx][0],
+                "negative_conflicts": None if pure_image_mode else slot_info[idx][2],
+                "rrf_ranks": ranks.get(idx, {}),
+                "probe": probe_val,
+                "probe_bonus": comp_probe_bonus_map.get(idx, 0.0) if compositional_mode else (self.probe_weight * probe_val if probe_val is not None else 0.0),
+                "probe_weight": active_probe_weight if compositional_mode else (self.probe_weight if probe_val is not None else 0.0),
+                "rrf_normalized": fused[idx] / rrf_denominator if probe_val is not None and not pure_image_mode else None,
+                "dense_rank_normalized": dense_normalized.get(idx),
+                "scoring_mode": "image_only" if image_only else (effective_variant if compositional_mode else ("metadata_diagnostic" if dense is None else effective_variant)),
+            }
+            if compositional_mode:
+                breakdown["subquery_soft_and"] = round(sub_and_map[idx], 6) if idx in sub_and_map else None
+                breakdown["negative_penalty"] = round(neg_pen_map[idx], 6) if idx in neg_pen_map else None
+                breakdown["subclause_count"] = len(decomp["sub_prompts"]) if decomp else 0
             results.append({"item_id": key, "rank": rank, "score": round(scores[idx], 6), "title": item.get("title", ""),
                             "thumb_url": f"/api/images/{key}?thumb=true", "image_url": f"/api/images/{key}",
                             "source": item.get("source"), "source_url": item.get("source_url"),
                             "matched_slots": matched, "evidence": evidence,
-                            "score_breakdown": {"dense": float(dense[idx]) if dense is not None and np.isfinite(dense[idx]) else None,
-                                                "bm25": None if image_only else round(float(lexical[idx]), 6), "slots": None if image_only else slot_info[idx][0],
-                                                "negative_conflicts": None if image_only else slot_info[idx][2], "rrf_ranks": ranks.get(idx, {}),
-                                                "probe": float(probe_scores[idx]) if probe_scores is not None else None,
-                                                "probe_bonus": self.probe_weight * float(probe_scores[idx]) if probe_scores is not None else 0.0,
-                                                "probe_weight": self.probe_weight if probe_scores is not None else 0.0,
-                                                "rrf_normalized": fused[idx] / rrf_denominator if probe_scores is not None and not image_only else None,
-                                                "dense_rank_normalized": dense_normalized.get(idx),
-                                                "scoring_mode": "image_only" if image_only else "metadata_diagnostic" if dense is None else effective_variant}})
+                            "score_breakdown": breakdown})
         dense_order = (sorted((idx for idx in candidates if np.isfinite(dense[idx])),
                               key=lambda idx: (-float(dense[idx]), str(self.items[idx]["item_id"])))
                        if dense is not None else [])
@@ -509,11 +643,13 @@ class SearchService:
                     "dense_top_support": float(support[dense_order[0]]),
                     "max_support": float(max(support[idx] for idx in dense_order)),
                 })
+        effective_pw = active_probe_weight if compositional_mode else self.probe_weight
         confidence = retrieval_evidence(
             parsed=parsed, dense_scores=[float(dense[idx]) for idx in dense_order],
             dense_available=dense is not None, results_available=bool(results), degraded=degraded,
-            probe_coverage=probe_coverage, probe_available=bool(self.probe_predictions),
-            probe_weight_positive=probe_scores is not None and self.probe_weight > 0,
+            probe_coverage=probe_coverage,
+            probe_available=bool(self.probe_predictions) if variant != "subquery_and" else False,
+            probe_weight_positive=probe_scores is not None and effective_pw > 0,
             probe_top_support=probe_top_support,
         )
         confidence["scope"] = "dense_recall_before_fusion"
@@ -533,14 +669,14 @@ class SearchService:
             warnings.append("显式筛选没有匹配结果；未自动放宽筛选。")
         return {"request_id": str(uuid.uuid4()), "query": query, "parsed": parsed.to_dict(), "variant": variant,
                 "effective_variant": effective_variant,
-                "probe_coverage": probe_coverage if image_only else None,
+                "probe_coverage": probe_coverage if variant in {"image_only", "compositional"} else None,
                 "confidence": confidence,
                 "results": results, "timings": {"parse_ms": round(parse_ms, 3), "total_ms": round(elapsed, 3),
                                                 "warm_total_ms": round(max(0, elapsed - load_timings["model_load_ms"]), 3),
                                                 "fusion_ms": round(fusion_ms, 3),
                                                 **{key: round(value, 3) if isinstance(value, float) else value for key, value in load_timings.items()}},
                 "model_version": self.model_version, "index_version": self.index_version, "degraded": degraded,
-                "retrieval_mode": "image_embeddings" if dense is not None else "unavailable" if image_only else "metadata_only", "warnings": warnings}
+                "retrieval_mode": "image_embeddings" if dense is not None else "unavailable" if pure_image_mode else "metadata_only", "warnings": warnings}
 
     @staticmethod
     def _level3_visual_query(parsed) -> str:

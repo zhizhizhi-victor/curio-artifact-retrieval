@@ -22,7 +22,17 @@ from curio.represent.validation import validate_object_splits
 from curio.retrieve.engine import SearchService
 
 
-VARIANTS = ("baseline", "translated", "hybrid", "adapted", "lexical", "visual", "image_only")
+VARIANTS = (
+    "baseline",
+    "translated",
+    "hybrid",
+    "adapted",
+    "lexical",
+    "visual",
+    "image_only",
+    "subquery_and",
+    "compositional",
+)
 
 
 def _probe_files(path):

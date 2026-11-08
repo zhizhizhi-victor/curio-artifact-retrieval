@@ -41,7 +41,17 @@ class SearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=1, max_length=1000)
     top_k: int = Field(default=12, ge=1, le=50)
-    variant: Literal["image_only", "baseline", "translated", "hybrid", "adapted", "visual", "lexical"] = "image_only"
+    variant: Literal[
+        "image_only",
+        "compositional",
+        "subquery_and",
+        "baseline",
+        "translated",
+        "hybrid",
+        "adapted",
+        "visual",
+        "lexical",
+    ] = "image_only"
     filters: Filters = Field(default_factory=Filters)
     stream: Literal[False] = False
 
@@ -113,8 +123,22 @@ def create_app(*, service: SearchService | None = None, data_path: str | Path | 
     application.state.search_service = service
     image_service = ImageSearchService(service)
     application.state.image_search_service = image_service
-    expanded_path = root_path / "data/snapshots/collection_v3_expanded.jsonl"
-    expanded_index = root_path / "artifacts/siglip_expanded"
+    default_exp_data = (
+        "data/snapshots/collection_10k.jsonl"
+        if (root_path / "data/snapshots/collection_10k.jsonl").exists()
+        else "data/snapshots/collection_v3_expanded.jsonl"
+    )
+    default_exp_idx = (
+        "artifacts/siglip_10k"
+        if (root_path / "artifacts/siglip_10k/manifest.json").exists()
+        else "artifacts/siglip_expanded"
+    )
+    expanded_path = Path(os.getenv("CURIO_EXPANDED_DATA", default_exp_data))
+    if not expanded_path.is_absolute():
+        expanded_path = root_path / expanded_path
+    expanded_index = Path(os.getenv("CURIO_EXPANDED_INDEX", default_exp_idx))
+    if not expanded_index.is_absolute():
+        expanded_index = root_path / expanded_index
     expanded_manifest_path = expanded_index / "manifest.json"
     expanded_manifest = json.loads(expanded_manifest_path.read_text(encoding="utf-8")) if expanded_manifest_path.exists() else {}
     expanded_enabled = bool(expanded_path.exists() and service.index_sha256
@@ -147,8 +171,17 @@ def create_app(*, service: SearchService | None = None, data_path: str | Path | 
                     service._dense("expanded image index initialization")
                 if not service.encoder:
                     raise HTTPException(503, "Matching image encoder unavailable")
-                candidate = SearchService(expanded_items, index_dir=expanded_index, encoder_name=service.encoder_name,
-                                          encoder=service.encoder, root=root_path, probe_weight=0)
+                exp_probes = root_path / "artifacts/probes" / expanded_index.name
+                use_exp_probes = expanded_index.name.startswith("siglip_10k") and (exp_probes / "report.json").is_file()
+                candidate = SearchService(
+                    expanded_items,
+                    index_dir=expanded_index,
+                    encoder_name=service.encoder_name,
+                    encoder=service.encoder,
+                    root=root_path,
+                    probes_path=exp_probes if use_exp_probes else None,
+                    probe_weight=service.probe_weight if use_exp_probes else 0,
+                )
                 if candidate.embeddings is None:
                     raise HTTPException(503, "Expanded image index failed validation")
                 candidate._encoder_lock = service._encoder_lock

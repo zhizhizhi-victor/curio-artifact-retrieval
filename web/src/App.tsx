@@ -5,7 +5,7 @@ import {
   Sparkles, X, Zap
 } from 'lucide-react'
 
-type Variant = 'baseline' | 'translated' | 'hybrid' | 'adapted' | 'lexical' | 'visual' | 'image_only'
+type Variant = 'baseline' | 'translated' | 'hybrid' | 'adapted' | 'lexical' | 'visual' | 'image_only' | 'subquery_and' | 'compositional'
 type SearchMode = 'text' | 'reference' | 'image'
 type VisualMethod = 'siglip' | 'dinov2' | 'dinov2_patch' | 'shape' | 'color' | 'texture' | 'siglip_shape' | 'siglip_color' | 'siglip_texture' | 'ensemble'
 type Reference = { reference_id: string; title?: string; source?: string; source_url?: string; license?: string; credit_line?: string; date?: string; period?: string; reign?: string }
@@ -26,7 +26,9 @@ type FacetEntry = { value: string; count: number }; type Facets = { object_type?
 type Filters = { object_type: string[]; material: string[]; era: [number, number]; source: string[] }
 
 const variants: { id: Variant; label: string; note: string }[] = [
-  { id: 'image_only', label: '图像模型检索', note: '按图文嵌入相似度排序；生产配置属性重排权重为 0' },
+  { id: 'compositional', label: '多条件组合视觉（推荐）', note: '纯图像：跨语言形态桥接 + 子句软合取（Soft-AND）+ 可靠度校准视觉探针门控' },
+  { id: 'subquery_and', label: '子句软合取视觉', note: '纯图像零样本：多条件子句拆解 + Soft-AND + 反向视觉对比抑制（无探针）' },
+  { id: 'image_only', label: '图像模型检索（v2）', note: '按图文嵌入相似度排序；生产配置属性重排权重为 0' },
   { id: 'hybrid', label: '元数据辅助', note: '稠密 + 词法 + 槽位融合' },
   { id: 'baseline', label: '基线', note: '单路图文相似度' },
   { id: 'translated', label: '词典扩展', note: '规则词典扩展查询' },
